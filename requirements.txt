@@ -1,0 +1,14 @@
+﻿# Core AI & Vision
+google-generativeai>=0.7.0
+
+# Image Processing
+Pillow>=11.0.0
+opencv-python>=5.0.0
+easyocr>=1.7.0
+
+# Excel COM Interop (Windows Only)
+pywin32>=311
+openpyxl>=3.1.5
+
+# Packaging
+pyinstaller>=6.0.0

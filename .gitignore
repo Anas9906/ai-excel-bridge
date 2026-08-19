@@ -1,0 +1,33 @@
+﻿# API Keys and Secrets
+.env
+*.env
+
+# PyInstaller Build Artifacts
+build/
+dist/
+*.spec
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*.class
+*.pyo
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+
+# Temp and OS Files
+*.tmp
+Thumbs.db
+.DS_Store
+
+# Test and Scratch Files
+scratch/
+test_*.py
