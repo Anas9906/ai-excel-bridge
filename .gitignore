@@ -1,4 +1,4 @@
-﻿# API Keys and Secrets
+# API Keys and Secrets
 .env
 *.env
 
@@ -28,6 +28,14 @@ env/
 Thumbs.db
 .DS_Store
 
-# Test and Scratch Files
+# Scratch Files & Debug Output
 scratch/
-test_*.py
+debug_output/
+debug_crop_*.png
+temp_ocr.png
+
+# Sensitive Raw Data / Excel Workbooks (Keep sample and real data private)
+test_data/
+*.xlsx
+*.xlsm
+*.backup
