@@ -446,15 +446,21 @@ class GIECOInsuranceSyncApp:
         self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
 
         # Placeholder text
-        self.canvas.create_text(
-            200, 200,
-            text="Select an image from\nthe Batch Queue to view",
-            fill="#555577",
-            font=("Helvetica", 13),
-            anchor=tk.CENTER,
-        )
+        self._show_canvas_placeholder()
 
         return frame
+
+    def _show_canvas_placeholder(self):
+        """Draw empty state placeholder on canvas."""
+        self.canvas.delete("all")
+        self.canvas.create_text(
+            250, 250,
+            text="📥\n\nLoad images or a folder to begin ↑",
+            fill="#a6adc8",
+            font=("Helvetica", 13),
+            justify=tk.CENTER,
+            tags="placeholder"
+        )
 
     # ─────────────────────────────────────────────────────────────
     # Panel 3: Fields Inspector, Diffs, and Single/Batch Commit
@@ -469,11 +475,11 @@ class GIECOInsuranceSyncApp:
         # Batch Write All Button
         self.batch_write_btn = tk.Button(
             bottom_actions,
-            text="🚀 WRITE ALL VALIDATED TO EXCEL",
+            text="🚀 WRITE 0 VALIDATED ROW(S) TO EXCEL",
             font=("Helvetica", 12, "bold"),
-            fg="#11111b",
-            bg=self.GREEN,
-            activebackground="#86efac",
+            fg=self.TEXT_COLOR,
+            bg=self.BTN_BG,
+            activebackground=self.ACCENT,
             activeforeground="#11111b",
             relief=tk.FLAT,
             padx=15,
@@ -519,17 +525,26 @@ class GIECOInsuranceSyncApp:
         )
         self.refresh_btn.pack(side=tk.LEFT, padx=(3, 0))
 
-        # ── Editable Date Fields Box ──
-        date_box = tk.LabelFrame(
+        # ── Editable Date Fields Box (Card Styling) ──
+        date_box = tk.Frame(
             bottom_actions,
+            bg="#1e2a3a",
+            bd=1,
+            relief=tk.FLAT,
+        )
+        date_box.pack(fill=tk.X, pady=(4, 4))
+
+        tk.Label(
+            date_box,
             text="📅 Editable Dates & Insurance No (Live Auto-Sync)",
             font=("Helvetica", 10, "bold"),
             fg=self.YELLOW,
-            bg=self.PANEL_BG,
-            relief=tk.GROOVE,
-            bd=1,
-        )
-        date_box.pack(fill=tk.X, pady=(4, 4))
+            bg="#1e2a3a",
+            anchor=tk.W,
+        ).pack(fill=tk.X, padx=6, pady=(6, 2))
+
+        # Divider
+        tk.Frame(date_box, bg="#2a3b4c", height=1).pack(fill=tk.X, padx=6, pady=2)
 
         for label, var in [
             ("Insurance No:", self.insurance_no_var),
@@ -538,7 +553,7 @@ class GIECOInsuranceSyncApp:
             ("Print Date:", self.print_date_var),
             ("Receipt Date:", self.receipt_date_var),
         ]:
-            row = tk.Frame(date_box, bg=self.PANEL_BG)
+            row = tk.Frame(date_box, bg="#1e2a3a")
             row.pack(fill=tk.X, padx=6, pady=2)
 
             tk.Label(
@@ -546,7 +561,7 @@ class GIECOInsuranceSyncApp:
                 text=label,
                 font=("Helvetica", 9),
                 fg=self.TEXT_COLOR,
-                bg=self.PANEL_BG,
+                bg="#1e2a3a",
                 width=17,
                 anchor=tk.W,
             ).pack(side=tk.LEFT)
@@ -562,6 +577,18 @@ class GIECOInsuranceSyncApp:
                 bd=2,
             )
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 2))
+            
+            # Use ghost text placeholder when empty
+            def _on_focus_out(e, v=var, l=label):
+                if not v.get():
+                    e.widget.configure(fg="#555577")
+            def _on_focus_in(e):
+                e.widget.configure(fg=self.YELLOW)
+            
+            entry.bind("<FocusIn>", _on_focus_in)
+            entry.bind("<FocusOut>", _on_focus_out)
+            if not var.get():
+                entry.configure(fg="#555577")
 
         # ── Scrollable Inspector Text ──
         self.fields_text = scrolledtext.ScrolledText(
@@ -684,11 +711,23 @@ class GIECOInsuranceSyncApp:
             messagebox.showwarning("Busy", "Cannot clear while batch processing is running.")
             return
 
+        # Clear data
         self.batch_items.clear()
+        
+        # Clear Treeview visually
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        # Reset labels & progress
         self.batch_count_var.set("Queue: 0 items")
         self.status_var.set("Queue cleared.")
+        self.progress_bar["value"] = 0
+        self.active_index = None
+        self.image_title_lbl.configure(text="📄 Certificate View")
+        
+        # Reset panels
         self._clear_fields()
-        self.canvas.delete("all")
+        self._show_canvas_placeholder()
         self._update_action_buttons()
 
     # ─────────────────────────────────────────────────────────────
@@ -1161,6 +1200,8 @@ class GIECOInsuranceSyncApp:
         self.batch_write_btn.configure(
             state=tk.NORMAL if valid_items else tk.DISABLED,
             text=f"🚀 WRITE {len(valid_items)} VALIDATED ROW(S) TO EXCEL",
+            bg=self.ACCENT if valid_items else self.BTN_BG,
+            fg="#11111b" if valid_items else self.TEXT_COLOR,
         )
         self.single_write_btn.configure(state=tk.NORMAL if has_active else tk.DISABLED)
         self.refresh_btn.configure(state=tk.NORMAL if self.active_index is not None else tk.DISABLED)
