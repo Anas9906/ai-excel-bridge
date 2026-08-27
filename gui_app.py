@@ -56,25 +56,51 @@ class GIECOInsuranceSyncApp:
         Path(__file__).parent / "test_data" / "كشف 4 سيارات 2026 - رامي.xlsx"
     )
 
-    # Color scheme
-    BG_COLOR = "#1e1e2e"
-    PANEL_BG = "#2d2d44"
-    TEXT_COLOR = "#cdd6f4"
-    ACCENT = "#89b4fa"
-    GREEN = "#a6e3a1"
-    YELLOW = "#f9e2af"
-    RED = "#f38ba8"
-    BTN_BG = "#45475a"
-    BTN_ACTIVE = "#585b70"
-    ENTRY_BG = "#313244"
-    TABLE_BG = "#181825"
-    TABLE_FG = "#cdd6f4"
+    # ── Single Unified Palette & Material Tokens ──
+    # 1. Base Layer (Dark Navy)
+    BASE_BG = "#0f1420"
+
+    # 2. Surface / Panel Layer (1 step lighter)
+    PANEL_BG = "#161c2c"
+
+    # 3. Elevated Surface (Buttons, inputs, cards, table elements)
+    ELEVATED_BG = "#1e2536"
+    ELEVATED_ACTIVE = "#262f44"
+    BORDER_COLOR = "#2a3449"
+    CANVAS_BG = "#0b0f19"
+
+    # 4. Primary Brand Accent (Single unified accent: Electric Sky-Blue)
+    ACCENT = "#38bdf8"
+    ACCENT_HOVER = "#7dd3fc"
+    ACCENT_DARK = "#0f1420"
+
+    # 5. Status Indicators (Strictly 3, used only for status signals)
+    STATUS_SUCCESS = "#22c55e"  # Green: Matched / Connected
+    STATUS_WARNING = "#f59e0b"  # Amber: Review Required / Partial Match
+    STATUS_ERROR = "#ef4444"    # Red: Error / Not Found / Disconnected
+
+    # 6. Typography & Text Hierarchy
+    TEXT_PRIMARY = "#f8fafc"    # Bright near-white for headers, values, active text
+    TEXT_SECONDARY = "#94a3b8"  # Slate grey for labels, column headers, status text
+    TEXT_MUTED = "#64748b"      # Muted grey for placeholders, disabled copy
+
+    # Backward-compatibility aliases
+    BG_COLOR = BASE_BG
+    TEXT_COLOR = TEXT_PRIMARY
+    GREEN = STATUS_SUCCESS
+    YELLOW = STATUS_WARNING
+    RED = STATUS_ERROR
+    BTN_BG = ELEVATED_BG
+    BTN_ACTIVE = ELEVATED_ACTIVE
+    ENTRY_BG = ELEVATED_BG
+    TABLE_BG = PANEL_BG
+    TABLE_FG = TEXT_PRIMARY
 
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("🏗️ GIECO Insurance Sync — Batch & OCR Studio V2")
         self.root.geometry("1350x850")
-        self.root.configure(bg=self.BG_COLOR)
+        self.root.configure(bg=self.BASE_BG)
         self.root.minsize(1000, 650)
 
         # UI State Guard
@@ -116,41 +142,49 @@ class GIECOInsuranceSyncApp:
         self.root.after(100, self._check_work_queue)
 
     def _setup_styles(self):
-        """Configure ttk styles for a modern dark look."""
+        """Configure ttk styles for a cohesive dark palette."""
         self.style = ttk.Style()
         self.style.theme_use("clam")
 
-        # Configure Treeview
+        # Treeview (Batch Queue)
         self.style.configure(
             "Batch.Treeview",
-            background=self.TABLE_BG,
-            foreground=self.TABLE_FG,
-            fieldbackground=self.TABLE_BG,
+            background=self.PANEL_BG,
+            foreground=self.TEXT_PRIMARY,
+            fieldbackground=self.PANEL_BG,
             font=("Helvetica", 10),
-            rowheight=26,
+            rowheight=28,
             borderwidth=0,
+            relief=tk.FLAT,
         )
         self.style.configure(
             "Batch.Treeview.Heading",
-            background=self.BTN_BG,
-            foreground=self.TEXT_COLOR,
-            font=("Helvetica", 10, "bold"),
+            background=self.ELEVATED_BG,
+            foreground=self.TEXT_SECONDARY,
+            font=("Helvetica", 9, "bold"),
             relief=tk.FLAT,
+            borderwidth=0,
+            padding=(6, 4),
         )
         self.style.map(
             "Batch.Treeview",
-            background=[("selected", self.ACCENT)],
-            foreground=[("selected", "#11111b")],
+            background=[("selected", self.ELEVATED_BG)],
+            foreground=[("selected", self.ACCENT)],
+        )
+        self.style.map(
+            "Batch.Treeview.Heading",
+            background=[("active", self.ELEVATED_ACTIVE)],
+            foreground=[("active", self.TEXT_PRIMARY)],
         )
 
         # Progressbar
         self.style.configure(
             "Batch.Horizontal.TProgressbar",
-            troughcolor=self.ENTRY_BG,
-            background=self.GREEN,
-            bordercolor=self.BG_COLOR,
-            lightcolor=self.GREEN,
-            darkcolor=self.GREEN,
+            troughcolor=self.ELEVATED_BG,
+            background=self.ACCENT,
+            bordercolor=self.PANEL_BG,
+            lightcolor=self.ACCENT,
+            darkcolor=self.ACCENT,
         )
 
     def _load_excel(self):
@@ -167,15 +201,15 @@ class GIECOInsuranceSyncApp:
     def _build_ui(self):
         """Build the main layout with 3 core panels: Batch Queue, Image Viewer, Fields & Diffs."""
         # ── 1. Top Title & Global Controls ──
-        top_frame = tk.Frame(self.root, bg=self.BG_COLOR, pady=6, padx=12)
+        top_frame = tk.Frame(self.root, bg=self.BASE_BG, pady=8, padx=14)
         top_frame.pack(fill=tk.X)
 
         title_label = tk.Label(
             top_frame,
             text="🏗️ GIECO Insurance Sync — Batch & OCR Studio",
-            font=("Helvetica", 16, "bold"),
+            font=("Helvetica", 15, "bold"),
             fg=self.ACCENT,
-            bg=self.BG_COLOR,
+            bg=self.BASE_BG,
         )
         title_label.pack(side=tk.LEFT)
 
@@ -183,8 +217,8 @@ class GIECOInsuranceSyncApp:
             top_frame,
             text=f"Excel: {'✅ ' + os.path.basename(self.excel_path) if self.handler else '❌ Not Found'}",
             font=("Helvetica", 10, "bold"),
-            fg=self.GREEN if self.handler else self.RED,
-            bg=self.BG_COLOR,
+            fg=self.STATUS_SUCCESS if self.handler else self.STATUS_ERROR,
+            bg=self.BASE_BG,
         )
         self.excel_status_lbl.pack(side=tk.RIGHT, padx=10)
 
@@ -192,20 +226,23 @@ class GIECOInsuranceSyncApp:
             top_frame,
             text="📊 Change Excel",
             font=("Helvetica", 9, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            activebackground=self.BTN_ACTIVE,
-            activeforeground=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.ACCENT,
+            highlightbackground=self.BASE_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=10,
-            pady=3,
+            pady=4,
             command=self._change_excel,
         )
         change_excel_btn.pack(side=tk.RIGHT, padx=5)
 
         # ── 2. Main Content Split Panels ──
         main_paned = tk.PanedWindow(
-            self.root, orient=tk.HORIZONTAL, bg=self.BG_COLOR, bd=0, sashwidth=4
+            self.root, orient=tk.HORIZONTAL, bg=self.BASE_BG, bd=0, sashwidth=6, sashrelief=tk.FLAT
         )
         main_paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
@@ -222,7 +259,7 @@ class GIECOInsuranceSyncApp:
         main_paned.add(right_fields_frame, minsize=420, width=540)
 
         # ── 3. Bottom Status Bar & Global Progress ──
-        bottom_bar = tk.Frame(self.root, bg=self.BTN_BG, padx=10, pady=3)
+        bottom_bar = tk.Frame(self.root, bg=self.PANEL_BG, padx=12, pady=4, highlightthickness=1, highlightbackground=self.BORDER_COLOR)
         bottom_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
         self.status_var = tk.StringVar(value="Ready. Load images to begin.")
@@ -230,8 +267,8 @@ class GIECOInsuranceSyncApp:
             bottom_bar,
             textvariable=self.status_var,
             font=("Helvetica", 9),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
+            fg=self.TEXT_SECONDARY,
+            bg=self.PANEL_BG,
             anchor=tk.W,
         )
         status_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -242,7 +279,7 @@ class GIECOInsuranceSyncApp:
             textvariable=self.batch_count_var,
             font=("Helvetica", 9, "bold"),
             fg=self.ACCENT,
-            bg=self.BTN_BG,
+            bg=self.PANEL_BG,
         )
         count_lbl.pack(side=tk.RIGHT, padx=10)
 
@@ -260,7 +297,7 @@ class GIECOInsuranceSyncApp:
             hdr_frame,
             text="📑 Batch Queue",
             font=("Helvetica", 12, "bold"),
-            fg=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
             bg=self.PANEL_BG,
         ).pack(side=tk.LEFT)
 
@@ -272,13 +309,16 @@ class GIECOInsuranceSyncApp:
             btn_row,
             text="📁 Load Images",
             font=("Helvetica", 10, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            activebackground=self.BTN_ACTIVE,
-            activeforeground=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.ACCENT,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=8,
-            pady=4,
+            pady=5,
             command=self._load_multiple_images,
         ).pack(side=tk.LEFT, padx=(0, 4), expand=True, fill=tk.X)
 
@@ -286,13 +326,16 @@ class GIECOInsuranceSyncApp:
             btn_row,
             text="📂 Load Folder",
             font=("Helvetica", 10, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            activebackground=self.BTN_ACTIVE,
-            activeforeground=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.ACCENT,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=8,
-            pady=4,
+            pady=5,
             command=self._load_folder,
         ).pack(side=tk.LEFT, expand=True, fill=tk.X)
 
@@ -304,10 +347,13 @@ class GIECOInsuranceSyncApp:
             run_row,
             text="⚡ Extract All Batch",
             font=("Helvetica", 11, "bold"),
-            fg="#11111b",
+            fg=self.ACCENT_DARK,
             bg=self.ACCENT,
-            activebackground="#b4befe",
-            activeforeground="#11111b",
+            activebackground=self.ACCENT_HOVER,
+            activeforeground=self.ACCENT_DARK,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=10,
             pady=6,
@@ -318,13 +364,16 @@ class GIECOInsuranceSyncApp:
         tk.Button(
             run_row,
             text="🗑️ Clear",
-            font=("Helvetica", 10),
-            fg=self.RED,
-            bg=self.ENTRY_BG,
-            activebackground=self.BTN_BG,
-            activeforeground=self.RED,
+            font=("Helvetica", 10, "bold"),
+            fg=self.STATUS_ERROR,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.STATUS_ERROR,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
-            padx=6,
+            padx=8,
             pady=6,
             command=self._clear_queue,
         ).pack(side=tk.LEFT)
@@ -336,7 +385,7 @@ class GIECOInsuranceSyncApp:
         self.progress_bar.pack(fill=tk.X, pady=(0, 6))
 
         # Treeview Batch List
-        tree_frame = tk.Frame(frame, bg=self.PANEL_BG)
+        tree_frame = tk.Frame(frame, bg=self.PANEL_BG, highlightthickness=1, highlightbackground=self.BORDER_COLOR)
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
         columns = ("id", "filename", "status", "match")
@@ -381,7 +430,7 @@ class GIECOInsuranceSyncApp:
             hdr_frame,
             text="📄 Certificate View",
             font=("Helvetica", 12, "bold"),
-            fg=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
             bg=self.PANEL_BG,
         )
         self.image_title_lbl.pack(side=tk.LEFT)
@@ -390,41 +439,23 @@ class GIECOInsuranceSyncApp:
         zoom_frame = tk.Frame(hdr_frame, bg=self.PANEL_BG)
         zoom_frame.pack(side=tk.RIGHT)
 
-        tk.Button(
-            zoom_frame,
-            text="🔍 +",
-            font=("Helvetica", 9, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            relief=tk.FLAT,
-            padx=8,
-            pady=2,
-            command=self._zoom_in,
-        ).pack(side=tk.LEFT, padx=2)
-
-        tk.Button(
-            zoom_frame,
-            text="🔍 -",
-            font=("Helvetica", 9, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            relief=tk.FLAT,
-            padx=8,
-            pady=2,
-            command=self._zoom_out,
-        ).pack(side=tk.LEFT, padx=2)
-
-        tk.Button(
-            zoom_frame,
-            text="Reset",
-            font=("Helvetica", 9),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            relief=tk.FLAT,
-            padx=6,
-            pady=2,
-            command=self._zoom_reset,
-        ).pack(side=tk.LEFT, padx=2)
+        for text, cmd, pad, font_w in [("🔍 +", self._zoom_in, 8, "bold"), ("🔍 -", self._zoom_out, 8, "bold"), ("Reset", self._zoom_reset, 6, "normal")]:
+            tk.Button(
+                zoom_frame,
+                text=text,
+                font=("Helvetica", 9, font_w),
+                fg=self.TEXT_PRIMARY,
+                bg=self.ELEVATED_BG,
+                activebackground=self.ELEVATED_ACTIVE,
+                activeforeground=self.ACCENT,
+                highlightbackground=self.PANEL_BG,
+                highlightthickness=0,
+                bd=0,
+                relief=tk.FLAT,
+                padx=pad,
+                pady=2,
+                command=cmd,
+            ).pack(side=tk.LEFT, padx=2)
 
         # Canvas with dual scrollbars
         canvas_frame = tk.Frame(frame, bg=self.PANEL_BG)
@@ -432,8 +463,9 @@ class GIECOInsuranceSyncApp:
 
         self.canvas = tk.Canvas(
             canvas_frame,
-            bg="#111122",
-            highlightthickness=0,
+            bg=self.CANVAS_BG,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_COLOR,
         )
         v_scroll = tk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.canvas.yview)
         h_scroll = tk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.canvas.xview)
@@ -456,8 +488,8 @@ class GIECOInsuranceSyncApp:
         self.canvas.create_text(
             250, 250,
             text="📥\n\nLoad images or a folder to begin ↑",
-            fill="#a6adc8",
-            font=("Helvetica", 13),
+            fill=self.TEXT_MUTED,
+            font=("Helvetica", 12),
             justify=tk.CENTER,
             tags="placeholder"
         )
@@ -477,10 +509,13 @@ class GIECOInsuranceSyncApp:
             bottom_actions,
             text="🚀 WRITE 0 VALIDATED ROW(S) TO EXCEL",
             font=("Helvetica", 12, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            activebackground=self.ACCENT,
-            activeforeground="#11111b",
+            fg=self.TEXT_MUTED,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ACCENT_HOVER,
+            activeforeground=self.ACCENT_DARK,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=15,
             pady=10,
@@ -497,10 +532,13 @@ class GIECOInsuranceSyncApp:
             single_row,
             text="💾 Save This Item",
             font=("Helvetica", 10, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BTN_BG,
-            activebackground=self.BTN_ACTIVE,
-            activeforeground=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.ACCENT,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=10,
             pady=6,
@@ -513,10 +551,13 @@ class GIECOInsuranceSyncApp:
             single_row,
             text="🔄 Refresh Diff",
             font=("Helvetica", 10),
-            fg=self.TEXT_COLOR,
-            bg=self.ENTRY_BG,
-            activebackground=self.BTN_BG,
-            activeforeground=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
+            bg=self.ELEVATED_BG,
+            activebackground=self.ELEVATED_ACTIVE,
+            activeforeground=self.ACCENT,
+            highlightbackground=self.PANEL_BG,
+            highlightthickness=0,
+            bd=0,
             relief=tk.FLAT,
             padx=10,
             pady=6,
@@ -525,11 +566,13 @@ class GIECOInsuranceSyncApp:
         )
         self.refresh_btn.pack(side=tk.LEFT, padx=(3, 0))
 
-        # ── Editable Date Fields Box (Card Styling) ──
+        # ── Editable Date Fields Box (Elevated Surface Card) ──
         date_box = tk.Frame(
             bottom_actions,
-            bg="#1e2a3a",
-            bd=1,
+            bg=self.ELEVATED_BG,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_COLOR,
+            bd=0,
             relief=tk.FLAT,
         )
         date_box.pack(fill=tk.X, pady=(4, 4))
@@ -538,13 +581,13 @@ class GIECOInsuranceSyncApp:
             date_box,
             text="📅 Editable Dates & Insurance No (Live Auto-Sync)",
             font=("Helvetica", 10, "bold"),
-            fg=self.YELLOW,
-            bg="#1e2a3a",
+            fg=self.ACCENT,
+            bg=self.ELEVATED_BG,
             anchor=tk.W,
-        ).pack(fill=tk.X, padx=6, pady=(6, 2))
+        ).pack(fill=tk.X, padx=8, pady=(6, 2))
 
         # Divider
-        tk.Frame(date_box, bg="#2a3b4c", height=1).pack(fill=tk.X, padx=6, pady=2)
+        tk.Frame(date_box, bg=self.BORDER_COLOR, height=1).pack(fill=tk.X, padx=8, pady=2)
 
         for label, var in [
             ("Insurance No:", self.insurance_no_var),
@@ -553,15 +596,15 @@ class GIECOInsuranceSyncApp:
             ("Print Date:", self.print_date_var),
             ("Receipt Date:", self.receipt_date_var),
         ]:
-            row = tk.Frame(date_box, bg="#1e2a3a")
-            row.pack(fill=tk.X, padx=6, pady=2)
+            row = tk.Frame(date_box, bg=self.ELEVATED_BG)
+            row.pack(fill=tk.X, padx=8, pady=2)
 
             tk.Label(
                 row,
                 text=label,
                 font=("Helvetica", 9),
-                fg=self.TEXT_COLOR,
-                bg="#1e2a3a",
+                fg=self.TEXT_SECONDARY,
+                bg=self.ELEVATED_BG,
                 width=17,
                 anchor=tk.W,
             ).pack(side=tk.LEFT)
@@ -570,49 +613,54 @@ class GIECOInsuranceSyncApp:
                 row,
                 textvariable=var,
                 font=("Courier", 11, "bold"),
-                bg=self.ENTRY_BG,
-                fg=self.YELLOW,
-                insertbackground=self.YELLOW,
+                bg=self.PANEL_BG,
+                fg=self.TEXT_PRIMARY,
+                insertbackground=self.ACCENT,
+                highlightbackground=self.BORDER_COLOR,
+                highlightcolor=self.ACCENT,
+                highlightthickness=1,
                 relief=tk.FLAT,
-                bd=2,
+                bd=0,
             )
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(2, 2))
             
             # Use ghost text placeholder when empty
             def _on_focus_out(e, v=var, l=label):
                 if not v.get():
-                    e.widget.configure(fg="#555577")
+                    e.widget.configure(fg=self.TEXT_MUTED)
             def _on_focus_in(e):
-                e.widget.configure(fg=self.YELLOW)
+                e.widget.configure(fg=self.TEXT_PRIMARY)
             
             entry.bind("<FocusIn>", _on_focus_in)
             entry.bind("<FocusOut>", _on_focus_out)
             if not var.get():
-                entry.configure(fg="#555577")
+                entry.configure(fg=self.TEXT_MUTED)
 
-        # ── Scrollable Inspector Text ──
+        # ── Scrollable Inspector Text (Console Card) ──
         self.fields_text = scrolledtext.ScrolledText(
             frame,
             wrap=tk.WORD,
             bg=self.PANEL_BG,
-            fg=self.TEXT_COLOR,
+            fg=self.TEXT_PRIMARY,
             font=("Courier", 11),
             relief=tk.FLAT,
             borderwidth=0,
-            insertbackground=self.TEXT_COLOR,
+            highlightthickness=1,
+            highlightbackground=self.BORDER_COLOR,
+            insertbackground=self.ACCENT,
             state=tk.DISABLED,
         )
         self.fields_text.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
 
         # Configure text tags
-        self.fields_text.tag_configure("header", foreground=self.ACCENT, font=("Courier", 12, "bold"))
-        self.fields_text.tag_configure("success", foreground=self.GREEN)
-        self.fields_text.tag_configure("warning", foreground=self.YELLOW)
-        self.fields_text.tag_configure("error", foreground=self.RED)
-        self.fields_text.tag_configure("label", foreground="#888899")
-        self.fields_text.tag_configure("value", foreground="#ffffff", font=("Courier", 11, "bold"))
-        self.fields_text.tag_configure("diff_old", foreground=self.RED)
-        self.fields_text.tag_configure("diff_new", foreground=self.GREEN)
+        self.fields_text.tag_configure("header", foreground=self.ACCENT, font=("Courier", 11, "bold"))
+        self.fields_text.tag_configure("success", foreground=self.STATUS_SUCCESS)
+        self.fields_text.tag_configure("warning", foreground=self.STATUS_WARNING)
+        self.fields_text.tag_configure("error", foreground=self.STATUS_ERROR)
+        self.fields_text.tag_configure("label", foreground=self.TEXT_SECONDARY)
+        self.fields_text.tag_configure("value", foreground=self.TEXT_PRIMARY, font=("Courier", 11, "bold"))
+        self.fields_text.tag_configure("diff_old", foreground=self.STATUS_ERROR)
+        self.fields_text.tag_configure("diff_new", foreground=self.STATUS_SUCCESS)
 
         self._display_text("BATCH & OCR INSPECTOR\n", "header")
         self._display_text("─" * 40 + "\n", "label")
@@ -1200,11 +1248,19 @@ class GIECOInsuranceSyncApp:
         self.batch_write_btn.configure(
             state=tk.NORMAL if valid_items else tk.DISABLED,
             text=f"🚀 WRITE {len(valid_items)} VALIDATED ROW(S) TO EXCEL",
-            bg=self.ACCENT if valid_items else self.BTN_BG,
-            fg="#11111b" if valid_items else self.TEXT_COLOR,
+            bg=self.ACCENT if valid_items else self.ELEVATED_BG,
+            fg=self.ACCENT_DARK if valid_items else self.TEXT_MUTED,
+            activebackground=self.ACCENT_HOVER if valid_items else self.ELEVATED_BG,
+            activeforeground=self.ACCENT_DARK if valid_items else self.TEXT_MUTED,
         )
-        self.single_write_btn.configure(state=tk.NORMAL if has_active else tk.DISABLED)
-        self.refresh_btn.configure(state=tk.NORMAL if self.active_index is not None else tk.DISABLED)
+        self.single_write_btn.configure(
+            state=tk.NORMAL if has_active else tk.DISABLED,
+            fg=self.TEXT_PRIMARY if has_active else self.TEXT_MUTED,
+        )
+        self.refresh_btn.configure(
+            state=tk.NORMAL if self.active_index is not None else tk.DISABLED,
+            fg=self.TEXT_PRIMARY if self.active_index is not None else self.TEXT_MUTED,
+        )
 
     def _write_single_to_excel(self):
         """Write the active item to Excel."""
@@ -1402,7 +1458,7 @@ class GIECOInsuranceSyncApp:
             self.handler = ExcelHandler(path)
             self.excel_path = path
             self.excel_status_lbl.configure(
-                text=f"Excel: ✅ {os.path.basename(path)}", fg=self.GREEN
+                text=f"Excel: ✅ {os.path.basename(path)}", fg=self.STATUS_SUCCESS
             )
             self.status_var.set(f"Excel loaded: {os.path.basename(path)}")
             if self.active_index is not None:
@@ -1410,7 +1466,7 @@ class GIECOInsuranceSyncApp:
             self._update_action_buttons()
         except Exception as e:
             self.handler = None
-            self.excel_status_lbl.configure(text="Excel: ❌ Error", fg=self.RED)
+            self.excel_status_lbl.configure(text="Excel: ❌ Error", fg=self.STATUS_ERROR)
             messagebox.showerror("Error", f"Failed to load Excel:\n{e}")
 
 
