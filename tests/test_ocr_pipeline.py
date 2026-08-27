@@ -322,5 +322,64 @@ class TestCOMGuardedFinally(unittest.TestCase):
         win32com_mock.client.DispatchEx.return_value.Quit.assert_not_called()
 
 
+# ── 6. Zero Hallucination & Retry Policy Tests ──────────────────────────────
+
+class TestZeroHallucinationPolicy(unittest.TestCase):
+
+    def test_unparseable_image_returns_empty_result_without_winrt(self):
+        """Unparseable image must return clean _empty_result() without running WinRT."""
+        from ocr_engine import extract_certificates_batch, _empty_result
+
+        with patch("ocr_engine._get_gemini_provider") as mock_gemini:
+            mock_provider = MagicMock()
+            # Simulate Gemini returning None (extraction failure)
+            mock_provider.extract_batch.return_value = [None]
+            mock_provider.request_count = 1
+            mock_gemini.return_value = mock_provider
+
+            with patch("ocr_engine._cache") as mock_cache:
+                mock_cache.get.return_value = None
+                mock_cache.get_stats.return_value = {"hit_rate": 0.0, "hits": 0, "total": 1}
+
+                # Ensure _extract_single_via_winrt is never invoked
+                with patch("ocr_engine._extract_single_via_winrt") as mock_winrt:
+                    results = extract_certificates_batch(["/dummy/path/cert.jpg"])
+                    mock_winrt.assert_not_called()
+
+        self.assertEqual(len(results), 1)
+        self.assertIsNone(results[0]["chassis_no"])
+        self.assertIsNone(results[0]["plate_digits"])
+        self.assertEqual(results[0]["engine_used"], "None")
+
+
+class TestSingleImageRetry(unittest.TestCase):
+
+    def test_batch_failure_triggers_single_retry(self):
+        """If batch returns None, provider must trigger _extract_single_image_retry before giving up."""
+        from ocr_provider import GeminiVisionProvider
+
+        provider = GeminiVisionProvider(api_key="TEST_KEY")
+
+        with patch.object(provider, "_call_gemini_with_backoff") as mock_call:
+            # First call (batch) returns malformed JSON
+            # Second call (strict retry) returns malformed JSON
+            # Third call (single retry) returns valid JSON object
+            mock_call.side_effect = [
+                "MALFORMED_BATCH",
+                "STILL_MALFORMED",
+                '{"image_index": 0, "chassis_no": "RECOVERED123", "plate_digits": "5678"}'
+            ]
+
+            with patch("PIL.Image.open") as mock_img:
+                mock_img.return_value = MagicMock(width=800, height=600)
+                results = provider.extract_batch(["/dummy/path/cert1.jpg"])
+
+        self.assertEqual(len(results), 1)
+        self.assertIsNotNone(results[0])
+        self.assertEqual(results[0]["chassis_no"], "RECOVERED123")
+        self.assertEqual(results[0]["plate_digits"], "5678")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

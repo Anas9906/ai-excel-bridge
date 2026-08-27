@@ -148,12 +148,29 @@ class GeminiVisionProvider(BaseOCRProvider):
     """
 
     _FIELD_PROMPT = """\
-You are an expert Arabic OCR parser for Egyptian Vehicle Insurance Certificates
-(شهادة سداد اشتراكات التأمين الاجتماعي عن سيارة).
+You are an expert Arabic OCR parser specializing in Egyptian Vehicle Social Insurance Certificates
+(جمهورية مصر العربية — الهيئة القومية للتأمين الاجتماعي — شهادة سداد اشتراكات تأمينية عن سيارة / نموذج رقم 4).
 
-I am sending you {n} certificate images. Return ONLY a JSON array of exactly
-{n} objects — one per image — in the same order as the images provided.
-Each object must use this exact schema (use null for missing fields):
+CRITICAL EXTRACTION RULES (PRECISION OVER GUESSING):
+1. Chassis Number (رقم الشاسيه): Extract the full uppercase alphanumeric VIN / chassis code (e.g. "ABAZA2135MEG01571", "3394000201735", "LNE101905"). Remove spaces or extraneous symbols.
+2. Plate Number (رقم اللوحة المعدنية):
+   - plate_digits: Only the numbers/digits (e.g. "3935", "8741", "7536", "1962").
+   - plate_letters: Only the Arabic letters (e.g. "س ط ص", "س ا ل", "ب ر ل").
+   - plate_full: Full combination (e.g. "س ط ص 3935").
+3. Insurance Number (الرقم التأميني للمنشأة/السيارة): 7 to 9 digits (e.g. "51585966", "32825469", "51332350").
+4. Dates (سارية من / سارية إلى / تاريخ إصدارها / تاريخ السداد):
+   - Convert all dates strictly to ISO format: YYYY-MM-DD.
+   - date_from: Start validity date (سارية من / من).
+   - date_to: End validity date (سارية إلى / إلى / حتى).
+   - cert_end_date: Print date (تاريخ اصدارها / تاريخ السداد).
+5. Service Number (كود الموظف / رقم الخدمة / المسلسل): E.g. "12120", "7096", "13295".
+6. Office Code (مكتب التأمينات): E.g. "سيدي جابر", "عطارين", "ابوالمطامير", "محرم بك".
+7. STAMP OVERLAYS: If an official red/blue ink stamp covers text or dates, carefully read the printed text underneath the stamp. Do NOT hallucinate.
+8. NUMERAL TRANSLITERATION: Convert any Arabic-Indic numerals (٠١٢٣٤٥٦٧٨٩) to standard digits (0123456789).
+9. If any field is illegible or missing, use null. Never invent or guess values.
+
+I am sending you {n} certificate images. Return ONLY a JSON array of exactly {n} objects — one per image — in the same order as the images provided.
+Each object must use this exact schema:
 
 {{
   "image_index": <int, 0-based>,
@@ -170,8 +187,36 @@ Each object must use this exact schema (use null for missing fields):
   "cert_end_date": <YYYY-MM-DD|null>
 }}
 
-Return ONLY the JSON array. No explanation, no markdown, no extra text.
+Return ONLY the JSON array. No explanation, no markdown code blocks, no extra text.
 The array MUST have exactly {n} elements."""
+
+    _SINGLE_FIELD_PROMPT = """\
+You are an expert Arabic OCR parser specializing in Egyptian Vehicle Social Insurance Certificates
+(جمهورية مصر العربية — الهيئة القومية للتأمين الاجتماعي — شهادة سداد اشتراكات تأمينية عن سيارة / نموذج رقم 4).
+
+CRITICAL EXTRACTION RULES (PRECISION OVER GUESSING):
+1. Chassis Number (رقم الشاسيه): Extract the full uppercase alphanumeric VIN / chassis code.
+2. Plate Number (رقم اللوحة المعدنية): Separate plate_digits, plate_letters, and plate_full.
+3. Insurance Number (الرقم التأميني): 7 to 9 digits.
+4. Dates: Convert all dates strictly to ISO format YYYY-MM-DD (date_from, date_to, cert_end_date).
+5. STAMP OVERLAYS: Carefully read text underneath any ink stamps. Do not hallucinate.
+6. If any field is illegible, set to null.
+
+Return ONLY a single JSON object matching this schema:
+{{
+  "image_index": 0,
+  "service_no": null,
+  "office_code": null,
+  "plate_digits": null,
+  "plate_letters": null,
+  "plate_full": null,
+  "insurance_no": null,
+  "chassis_no": null,
+  "driver_name": null,
+  "date_from": null,
+  "date_to": null,
+  "cert_end_date": null
+}}"""
 
     _STRICT_RETRY_SUFFIX = (
         "\n\nIMPORTANT: Your previous response was not valid JSON or had the wrong"
@@ -220,9 +265,16 @@ The array MUST have exactly {n} elements."""
         return results
 
     def _extract_chunk(self, image_paths: List[str]) -> List[Optional[dict]]:
-        """Process a single sub-batch of up to self.batch_size images."""
+        """Process a single sub-batch of up to self.batch_size images with single-image retry fallback."""
         from PIL import Image
-        from google.genai import types
+        try:
+            from google.genai import types
+        except ImportError:
+            try:
+                from google import genai
+                types = getattr(genai, "types", None)
+            except ImportError:
+                types = None
 
         n = len(image_paths)
         prompt = self._FIELD_PROMPT.format(n=n)
@@ -250,11 +302,8 @@ The array MUST have exactly {n} elements."""
         contents = [img for img in images if img is not None] + [prompt]
 
         raw_response = self._call_gemini_with_backoff(contents, types)
-        if raw_response is None:
-            return [None] * n
+        parsed = _repair_json(raw_response) if raw_response else None
 
-        # Local JSON repair before any API retry
-        parsed = _repair_json(raw_response)
         if not isinstance(parsed, list) or len(parsed) != n:
             logger.warning(
                 "[GeminiProvider] Response length mismatch or invalid JSON (%s items, expected %d). "
@@ -265,24 +314,61 @@ The array MUST have exactly {n} elements."""
             strict_contents = contents[:-1] + [prompt + self._STRICT_RETRY_SUFFIX]
             raw_response = self._call_gemini_with_backoff(strict_contents, types)
             parsed = _repair_json(raw_response) if raw_response else None
-            if not isinstance(parsed, list) or len(parsed) != n:
-                logger.error("[GeminiProvider] Strict retry also failed — returning None for batch.")
-                return [None] * n
 
-        # Normalize each item to the standard field dict
-        return [self._normalize(item) if isinstance(item, dict) else None for item in parsed]
+        # Normalize batch results
+        batch_out: List[Optional[dict]] = [None] * n
+        if isinstance(parsed, list):
+            for i, item in enumerate(parsed[:n]):
+                if isinstance(item, dict) and (item.get("chassis_no") or item.get("plate_digits")):
+                    batch_out[i] = self._normalize(item)
+
+        # Tier 2: Single-image focused retry for any failed images in the batch
+        for i, res in enumerate(batch_out):
+            if res is None and images[i] is not None:
+                logger.info("[GeminiProvider] Batch failed for image #%d (%s) — attempting isolated single-image retry.",
+                            i + 1, Path(image_paths[i]).name)
+                retry_res = self._extract_single_image_retry(images[i], types)
+                if retry_res is not None:
+                    logger.info("[GeminiProvider] ✅ Single-image retry succeeded for %s", Path(image_paths[i]).name)
+                    batch_out[i] = retry_res
+
+        return batch_out
+
+    def _extract_single_image_retry(self, img, types) -> Optional[dict]:
+        """Isolated high-attention single-image extraction retry."""
+        try:
+            contents = [img, self._SINGLE_FIELD_PROMPT]
+            raw = self._call_gemini_with_backoff(contents, types)
+            if not raw:
+                return None
+            parsed = _repair_json(raw)
+            if isinstance(parsed, list) and len(parsed) == 1:
+                parsed = parsed[0]
+            if isinstance(parsed, dict) and (parsed.get("chassis_no") or parsed.get("plate_digits")):
+                return self._normalize(parsed)
+        except Exception as e:
+            logger.warning("[GeminiProvider] Single-image retry failed: %s", e)
+        return None
 
     def _call_gemini_with_backoff(self, contents, types, max_retries: int = 3) -> Optional[str]:
-        """Call Gemini with exponential backoff on RPM 429s. Raises on RPD exhaustion."""
+        """Call Gemini with zero temperature for deterministic, hallucination-free output."""
         client = self._get_client()
         delay = 2.0
 
         for attempt in range(max_retries + 1):
             try:
+                config = (
+                    types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0,
+                    )
+                    if (types and hasattr(types, "GenerateContentConfig"))
+                    else {"response_mime_type": "application/json", "temperature": 0.0}
+                )
                 response = client.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=contents,
-                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                    config=config,
                 )
                 self.request_count += 1
                 logger.info("[GeminiProvider] API request #%d succeeded (attempt %d).",

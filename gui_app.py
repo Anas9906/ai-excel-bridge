@@ -970,15 +970,15 @@ class GIECOInsuranceSyncApp:
                     if not date_to:
                         date_to = calc_to.strftime("%Y-%m-%d")
 
-                # Flag partial chassis matches for supervisor review
-                has_partial = any(
-                    "partial" in (m.match_type or "") for m in matches
-                ) if matches else False
-
-                status = (
-                    "⚠️ Review Required" if has_partial
-                    else ("✅ Matched" if matches else "❌ Not Found")
-                )
+                # Determine clean, explicit status (Zero silent hallucination)
+                if not chassis and not plate:
+                    status = "⚠️ Manual Entry"
+                elif has_partial:
+                    status = "⚠️ Review Required"
+                elif matches:
+                    status = "✅ Matched"
+                else:
+                    status = "❌ Not Found"
 
                 result_payload = {
                     "ocr_data": ocr_data,
@@ -1143,12 +1143,14 @@ class GIECOInsuranceSyncApp:
             self._display_text("  Click 'Extract All Batch' to process.\n", "label")
             return
 
-        # Show engine
-        engine = ocr_data.get("engine_used", "WinRT OCR")
+        # Show engine / status
+        engine = ocr_data.get("engine_used", "None")
         if "Gemini" in engine:
-            self._display_text("  ✨ AI VISION: 100% Extracted with Gemini\n\n", "success")
+            self._display_text("  ✨ AI VISION: Extracted with High-Precision Gemini\n\n", "success")
+        elif not ocr_data.get("chassis_no") and not ocr_data.get("plate_digits"):
+            self._display_text("  ⚠️ AI EXTRACTION INCOMPLETE: Please review certificate on Canvas.\n\n", "warning")
         else:
-            self._display_text("  ⚡ ENGINE: Windows WinRT OCR\n\n", "label")
+            self._display_text(f"  ⚡ ENGINE: {engine}\n\n", "label")
 
         fields = [
             ("Service No", "service_no"),

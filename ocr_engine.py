@@ -135,29 +135,19 @@ def extract_certificates_batch(image_paths: List[str]) -> List[dict]:
     provider = _get_gemini_provider()
     batch_results = provider.extract_batch(uncached_paths)
 
-    # Step 3: Fill cache + fall back to WinRT for None slots
-    winrt_fallback_indices: List[int] = []
+    # Step 3: Populate cache for successful extractions; flag failures explicitly (Zero Hallucination)
     for local_idx, global_idx in enumerate(uncached_indices):
         data = batch_results[local_idx]
-        if data is not None:
+        if data is not None and (data.get("chassis_no") or data.get("plate_digits")):
             _cache.set(image_paths[global_idx], data)
             results[global_idx] = data
         else:
-            winrt_fallback_indices.append(global_idx)
-
-    # Step 4: WinRT fallback for images Gemini couldn't parse
-    if winrt_fallback_indices:
-        logger.info("[OCR] %d images falling back to WinRT OCR.", len(winrt_fallback_indices))
-        winrt = _get_winrt_provider()
-        fallback_paths = [image_paths[i] for i in winrt_fallback_indices]
-        fallback_results = winrt.extract_batch(fallback_paths)
-        for local_idx, global_idx in enumerate(winrt_fallback_indices):
-            data = fallback_results[local_idx]
-            if data is not None:
-                _cache.set(image_paths[global_idx], data)
-                results[global_idx] = data
-            else:
-                results[global_idx] = _empty_result()
+            logger.warning(
+                "[OCR] Image #%d (%s) extraction failed or low confidence. "
+                "Flagging for manual canvas review — zero silent corruption.",
+                global_idx + 1, Path(image_paths[global_idx]).name,
+            )
+            results[global_idx] = _empty_result()
 
     # Log final cache stats
     final_stats = _cache.get_stats()
