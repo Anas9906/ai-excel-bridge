@@ -51,9 +51,9 @@ from excel_handler import ExcelHandler
 class GIECOInsuranceSyncApp:
     """Main application window for GIECO Insurance Sync V2 with Batch Support."""
 
-    # Default Excel path
+    # Default Excel path (Mock fleet master)
     DEFAULT_EXCEL = str(
-        Path(__file__).parent / "test_data" / "كشف 4 سيارات 2026 - رامي.xlsx"
+        Path(__file__).parent / "test_data" / "gieco_fleet_master_2026.xlsx"
     )
 
     # ── Single Unified Palette & Material Tokens ──

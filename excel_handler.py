@@ -1,15 +1,16 @@
 """
-excel_handler.py — Master Excel Reader/Writer for GIECO Insurance Sync
+excel_handler.py — Safe Excel updates via win32com
 
-Handles reading and writing to كشف 4 سيارات 2026 - رامي.xlsx:
-    - Search by Chassis Number (Col 19) or Plate Digits (Col 18)
-    - Auto-increment كود شهادة (Col 23)
-    - Write exactly 7 target fields per certificate
-    - Preserve existing formulas (Col 32)
+Handles reading and writing to gieco_fleet_master_2026.xlsx:
+- Reads master vehicle list with chassis and plate numbers
+- Matches OCR extracted data against sheet rows
+- Prepares and validates changes (diff generation)
+- Applies updates using win32com (Excel COM automation) to preserve all formulas
+- Highlights updated rows/cells in Soft Green
+- Creates automatic timestamped backups before applying changes
 
 Usage:
-    from excel_handler import ExcelHandler
-    handler = ExcelHandler("كشف 4 سيارات 2026 - رامي.xlsx")
+    handler = ExcelHandler("gieco_fleet_master_2026.xlsx")
     match = handler.find_vehicle("34271")
     diff = handler.prepare_update(match, ocr_data)
     handler.apply_update(diff, dry_run=True)
