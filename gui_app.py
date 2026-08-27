@@ -122,12 +122,12 @@ class GIECOInsuranceSyncApp:
         self.zoom_level = 1.0
         self.base_scale = 1.0
 
-        # Editable Form Fields (StringVar)
+        # Editable Form Fields (StringVar) - Formatted in Day-Month-Year (DD-MM-YYYY) for UI
         self.insurance_no_var = tk.StringVar()
         self.date_from_var = tk.StringVar()
         self.date_to_var = tk.StringVar()
         self.print_date_var = tk.StringVar()
-        self.receipt_date_var = tk.StringVar(value=date.today().isoformat())
+        self.receipt_date_var = tk.StringVar(value=self._to_ui_date(date.today()))
 
         # Bind variable changes to auto-update active batch item
         for var in (self.insurance_no_var, self.date_from_var, self.date_to_var, self.print_date_var, self.receipt_date_var):
@@ -140,6 +140,50 @@ class GIECOInsuranceSyncApp:
 
         # Start background polling for queue results
         self.root.after(100, self._check_work_queue)
+
+    @staticmethod
+    def _to_ui_date(d_val: Optional[Any]) -> str:
+        """Convert ISO date string (YYYY-MM-DD), datetime/date object to UI display format DD-MM-YYYY."""
+        if not d_val:
+            return ""
+        if isinstance(d_val, (date, datetime)):
+            return d_val.strftime("%d-%m-%Y")
+        s = str(d_val).strip()
+        if not s:
+            return ""
+        # Check if already DD-MM-YYYY or DD/MM/YYYY
+        m_dd = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", s)
+        if m_dd:
+            d, m, y = m_dd.groups()
+            return f"{int(d):02d}-{int(m):02d}-{y}"
+        # Check if YYYY-MM-DD or YYYY/MM/DD
+        m_iso = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)
+        if m_iso:
+            y, m, d = m_iso.groups()
+            return f"{int(d):02d}-{int(m):02d}-{y}"
+        return s
+
+    @staticmethod
+    def _to_iso_date(d_val: Optional[Any]) -> Optional[str]:
+        """Convert UI date string (DD-MM-YYYY or DD/MM/YYYY or YYYY-MM-DD) to ISO format YYYY-MM-DD for backend/Excel."""
+        if not d_val:
+            return None
+        if isinstance(d_val, (date, datetime)):
+            return d_val.strftime("%Y-%m-%d")
+        s = str(d_val).strip()
+        if not s:
+            return None
+        # Check DD-MM-YYYY or DD/MM/YYYY
+        m_dd = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", s)
+        if m_dd:
+            d, m, y = m_dd.groups()
+            return f"{y}-{int(m):02d}-{int(d):02d}"
+        # Check YYYY-MM-DD or YYYY/MM/DD
+        m_iso = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", s)
+        if m_iso:
+            y, m, d = m_iso.groups()
+            return f"{y}-{int(m):02d}-{int(d):02d}"
+        return s
 
     def _setup_styles(self):
         """Configure ttk styles for a cohesive dark palette."""
@@ -1069,17 +1113,16 @@ class GIECOInsuranceSyncApp:
         self._show_image(item["path"])
         self.image_title_lbl.configure(text=f"📄 {item['filename']} (#{item['id']})")
 
-        # 2. Populate editable date fields
+        # 2. Populate editable date fields (formatted as DD-MM-YYYY for UI display)
         self._is_updating_ui = True
         try:
             self.insurance_no_var.set(item.get("insurance_no") or "")
-            self.date_from_var.set(item.get("date_from") or "")
-            self.date_to_var.set(item.get("date_to") or "")
-            self.print_date_var.set(item.get("print_date") or "")
-            self.receipt_date_var.set(item.get("receipt_date") or date.today().isoformat())
+            self.date_from_var.set(self._to_ui_date(item.get("date_from")))
+            self.date_to_var.set(self._to_ui_date(item.get("date_to")))
+            self.print_date_var.set(self._to_ui_date(item.get("print_date")))
+            self.receipt_date_var.set(self._to_ui_date(item.get("receipt_date")) or self._to_ui_date(date.today()))
         finally:
             self._is_updating_ui = False
-
 
         # 3. Render Fields Inspector
         self._render_inspector_text(item)
@@ -1128,13 +1171,14 @@ class GIECOInsuranceSyncApp:
             self._display_text(f"  {icon} {label:15s}: ", "label")
             self._display_text(f"{val}\n", tag)
 
-        # Dates
-        self._display_text("\n  📅 Certificate Dates:\n", "header")
+        # Dates (Formatted as Day-Month-Year for UI clarity)
+        self._display_text("\n  📅 Certificate Dates (DD-MM-YYYY):\n", "header")
         for label, key in [("Date From", "date_from"), ("Date To", "date_to"), ("Print Date", "print_date")]:
             val = item.get(key)
             if val:
+                ui_val = self._to_ui_date(val)
                 self._display_text(f"  ✅ {label:15s}: ", "label")
-                self._display_text(f"{val}\n", "success")
+                self._display_text(f"{ui_val}\n", "success")
             else:
                 self._display_text(f"  ⚠️  {label:15s}: ", "label")
                 self._display_text("Empty (Enter below)\n", "warning")
@@ -1203,10 +1247,12 @@ class GIECOInsuranceSyncApp:
                 if new is None:
                     self._display_text(f"      ⚠️  EMPTY — enter date\n", "warning")
                 elif str(old) == str(new):
-                    self._display_text(f"      = {new}\n", "label")
+                    self._display_text(f"      = {self._to_ui_date(new)}\n", "label")
                 else:
-                    self._display_text(f"      Old: {old}\n", "diff_old")
-                    self._display_text(f"      New: {new}\n", "diff_new")
+                    old_ui = self._to_ui_date(old)
+                    new_ui = self._to_ui_date(new)
+                    self._display_text(f"      Old: {old_ui}\n", "diff_old")
+                    self._display_text(f"      New: {new_ui}\n", "diff_new")
 
     def _on_field_edited(self, *args):
         """Triggered whenever user edits an active date/insurance field."""
@@ -1215,12 +1261,12 @@ class GIECOInsuranceSyncApp:
 
         item = self.batch_items[self.active_index]
         item["insurance_no"] = self.insurance_no_var.get().strip() or None
-        item["date_from"] = self.date_from_var.get().strip() or None
-        item["date_to"] = self.date_to_var.get().strip() or None
-        item["print_date"] = self.print_date_var.get().strip() or None
+        item["date_from"] = self._to_iso_date(self.date_from_var.get())
+        item["date_to"] = self._to_iso_date(self.date_to_var.get())
+        item["print_date"] = self._to_iso_date(self.print_date_var.get())
         
         # Global sync for Receipt Date across the entire batch
-        new_receipt = self.receipt_date_var.get().strip() or None
+        new_receipt = self._to_iso_date(self.receipt_date_var.get())
         for b_item in self.batch_items:
             b_item["receipt_date"] = new_receipt
 
