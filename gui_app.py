@@ -43,7 +43,8 @@ from typing import Optional, List, Dict, Any
 from PIL import Image, ImageTk
 
 from stamp_remover import remove_stamp
-from ocr_engine import extract_certificate_data
+from ocr_engine import extract_certificates_batch, extract_certificate_data
+from ocr_provider import DailyQuotaExhaustedError, GEMINI_BATCH_SIZE, GEMINI_RPM
 from excel_handler import ExcelHandler
 
 
@@ -684,10 +685,6 @@ class GIECOInsuranceSyncApp:
             return
 
         self.batch_items.clear()
-        self.active_index = None
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
         self.batch_count_var.set("Queue: 0 items")
         self.status_var.set("Queue cleared.")
         self._clear_fields()
@@ -719,32 +716,89 @@ class GIECOInsuranceSyncApp:
         threading.Thread(target=self._batch_worker, daemon=True).start()
 
     def _batch_worker(self):
-        """Worker thread processing items concurrently for 10x speed boost."""
-        import concurrent.futures
+        """Rate-limit-aware batch worker. Uses extract_certificates_batch for 3-6x API efficiency."""
+        import json
+        import time
 
-        # Phase 1: Parallel OCR Extraction
-        ocr_results = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_idx = {}
-            for idx, item in enumerate(self.batch_items):
-                if item["status"] in ("✅ Matched", "💾 Saved") and item["ocr_data"]:
-                    continue
+        # Collect pending indices
+        pending_indices = [
+            idx for idx, item in enumerate(self.batch_items)
+            if not (item["status"] in ("✅ Matched", "💾 Saved") and item["ocr_data"])
+        ]
 
-                self.work_queue.put(("status_update", idx, "🔄 Extracting..."))
-                # Submit just the network-bound OCR function to the thread pool
-                future = executor.submit(extract_certificate_data, item["path"])
-                future_to_idx[future] = idx
+        if not pending_indices:
+            self.work_queue.put(("batch_complete", None, None))
+            return
 
-            for future in concurrent.futures.as_completed(future_to_idx):
-                idx = future_to_idx[future]
+        # Compute inter-batch delay to stay within GEMINI_RPM
+        inter_batch_delay = 60.0 / max(GEMINI_RPM, 1)
+        pending_paths = [self.batch_items[i]["path"] for i in pending_indices]
+
+        # Signal all pending items as extracting
+        for idx in pending_indices:
+            self.work_queue.put(("status_update", idx, "🔄 Extracting..."))
+
+        # Phase 1: Batch OCR Extraction with rate-limit awareness
+        ocr_results: dict = {}  # idx -> dict or Exception
+        chunk_size = GEMINI_BATCH_SIZE
+        total_chunks = (len(pending_paths) + chunk_size - 1) // chunk_size
+
+        for chunk_num in range(total_chunks):
+            chunk_start = chunk_num * chunk_size
+            chunk_end = min(chunk_start + chunk_size, len(pending_paths))
+            chunk_paths = pending_paths[chunk_start:chunk_end]
+            chunk_indices = pending_indices[chunk_start:chunk_end]
+
+            self.work_queue.put((
+                "status_bar",
+                None,
+                f"🧠 Extracting batch {chunk_num + 1}/{total_chunks} ({len(chunk_paths)} images)...",
+            ))
+
+            try:
+                results = extract_certificates_batch(chunk_paths)
+                for local_i, global_idx in enumerate(chunk_indices):
+                    ocr_results[global_idx] = results[local_i]
+
+            except DailyQuotaExhaustedError as e:
+                # Save uncompleted items to resumable state file
+                remaining_paths = pending_paths[chunk_start:]
+                remaining_indices = pending_indices[chunk_start:]
+                state = {
+                    "remaining_paths": remaining_paths,
+                    "remaining_indices": remaining_indices,
+                }
+                state_path = ".ocr_state.json"
                 try:
-                    ocr_data = future.result()
-                    ocr_results[idx] = ocr_data
-                except Exception as e:
-                    ocr_results[idx] = e
-                    self.work_queue.put(("item_error", idx, str(e)))
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(state, f, ensure_ascii=False, indent=2)
+                except Exception as write_err:
+                    print(f"[WARN] Could not save state file: {write_err}")
 
-        # Phase 2: Sequential Excel Matching & UI Updates (Safe for COM objects)
+                done_count = chunk_start
+                remaining_count = len(pending_paths) - chunk_start
+                self.work_queue.put((
+                    "quota_exhausted",
+                    None,
+                    f"Daily Gemini quota exhausted after {done_count} images. "
+                    f"{remaining_count} images saved to {state_path} for tomorrow.",
+                ))
+                # Mark remaining items as paused
+                for idx in remaining_indices:
+                    self.work_queue.put(("status_update", idx, "⏸ Paused (quota)"))
+                # Process only what we have so far and stop
+                break
+
+            except Exception as e:
+                for global_idx in chunk_indices:
+                    ocr_results[global_idx] = e
+                    self.work_queue.put(("item_error", global_idx, str(e)))
+
+            # RPM pacing: sleep between chunks (not after the last one)
+            if chunk_num < total_chunks - 1:
+                time.sleep(inter_batch_delay)
+
+        # Phase 2: Sequential Excel matching (safe for COM objects, not thread-safe)
         for idx, item in enumerate(self.batch_items):
             if idx not in ocr_results:
                 self.work_queue.put(("progress", idx + 1, None))
@@ -758,7 +812,6 @@ class GIECOInsuranceSyncApp:
             ocr_data = res
 
             try:
-                # 2. Match in Excel
                 chassis = ocr_data.get("chassis_no")
                 plate = ocr_data.get("plate_digits")
 
@@ -769,7 +822,7 @@ class GIECOInsuranceSyncApp:
                     if not matches and plate:
                         matches = self.handler.find_vehicle(plate)
 
-                # 3. Fallback date calculation if OCR missed dates
+                # Fallback date calculation if OCR missed dates
                 date_from = ocr_data.get("date_from") or ""
                 date_to = ocr_data.get("date_to") or ""
 
@@ -786,7 +839,15 @@ class GIECOInsuranceSyncApp:
                     if not date_to:
                         date_to = calc_to.strftime("%Y-%m-%d")
 
-                status = "✅ Matched" if matches else "❌ Not Found"
+                # Flag partial chassis matches for supervisor review
+                has_partial = any(
+                    "partial" in (m.match_type or "") for m in matches
+                ) if matches else False
+
+                status = (
+                    "⚠️ Review Required" if has_partial
+                    else ("✅ Matched" if matches else "❌ Not Found")
+                )
 
                 result_payload = {
                     "ocr_data": ocr_data,
@@ -840,6 +901,20 @@ class GIECOInsuranceSyncApp:
                         # If active item finished, refresh display
                         if self.active_index == idx:
                             self._load_item_into_view(idx)
+
+                elif msg_type == "status_bar":
+                    if payload:
+                        self.status_var.set(payload)
+
+                elif msg_type == "quota_exhausted":
+                    self.is_processing_batch = False
+                    self.process_batch_btn.configure(state=tk.NORMAL, text="\u26a1 Extract All Batch")
+                    self.status_var.set(f"\u26a0\ufe0f Quota exhausted — partial progress saved.")
+                    messagebox.showwarning(
+                        "Daily Quota Exhausted",
+                        payload or "Gemini daily quota reached. Remaining items saved to .ocr_state.json."
+                    )
+                    self._update_action_buttons()
 
                 elif msg_type == "item_error":
                     if idx < len(self.batch_items):
@@ -986,8 +1061,14 @@ class GIECOInsuranceSyncApp:
             self._display_text("  ❌ Vehicle NOT FOUND in master sheet.\n", "error")
             return
 
+        if item.get("needs_review"):
+            self._display_text(
+                "  ⚠️  PARTIAL CHASSIS MATCH — Manual review required before writing!\n", "warning"
+            )
+
         for m in matches:
-            self._display_text(f"  ✅ Row {m.row_number} ({m.match_type})\n", "success")
+            icon = "⚠️" if "partial" in (m.match_type or "") else "✅"
+            self._display_text(f"  {icon} Row {m.row_number} ({m.match_type})\n", "warning" if "partial" in (m.match_type or "") else "success")
             self._display_text(f"     Driver:    ", "label")
             self._display_text(f"{m.driver_name}\n", "value")
             self._display_text(f"     Office:    ", "label")

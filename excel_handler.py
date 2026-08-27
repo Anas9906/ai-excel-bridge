@@ -158,9 +158,11 @@ class ExcelHandler:
         """
         Search the master sheet for a vehicle by Chassis Number or Plate Digits.
 
-        First searches Col 19 (الشاسيه) for exact or partial match.
-        If no chassis match, falls back to searching Col 18 (رقم السيارة)
-        for the digit portion of the plate.
+        Matching priority:
+            1. Exact chassis match  (Col 19) — safest, highest confidence.
+            2. Partial chassis match (Col 19) — only if no exact match found;
+               flagged as 'chassis (partial - review required)'.
+            3. Exact plate-digit match (Col 18) — only if both chassis passes fail.
 
         Args:
             chassis_or_plate: Chassis number string or plate digit string.
@@ -168,20 +170,33 @@ class ExcelHandler:
         Returns:
             List of VehicleMatch objects (may be 0, 1, or 2 for dual-driver vehicles).
         """
-        matches = []
+        matches: list = []
         search = str(chassis_or_plate).strip()
 
-        # Search by Chassis (Col 19)
+        # Pass 1: Exact chassis match (Col 19)
         for row in range(HEADER_ROWS + 1, self.max_row + 1):
             val = self.ws.cell(row=row, column=19).value
-            if val is not None and str(val).strip():
+            if val is not None:
                 clean_val = str(val).strip()
-                if search == clean_val or search in clean_val or clean_val.endswith(search):
+                if search == clean_val:
                     match = self._build_match(row, "chassis")
                     if match:
                         matches.append(match)
 
-        # Fallback: search by plate digits (Col 18)
+        # Pass 2: Partial chassis match — only if exact pass found nothing
+        if not matches:
+            for row in range(HEADER_ROWS + 1, self.max_row + 1):
+                val = self.ws.cell(row=row, column=19).value
+                if val is not None:
+                    clean_val = str(val).strip()
+                    if clean_val and search != clean_val and (
+                        search in clean_val or clean_val.endswith(search)
+                    ):
+                        match = self._build_match(row, "chassis (partial - review required)")
+                        if match:
+                            matches.append(match)
+
+        # Pass 3: Exact plate-digit match (Col 18) — fallback only
         if not matches:
             for row in range(HEADER_ROWS + 1, self.max_row + 1):
                 val = self.ws.cell(row=row, column=18).value
@@ -341,63 +356,72 @@ class ExcelHandler:
             base, ext = os.path.splitext(self.excel_path)
             output_path = f"{base}_updated{ext}"
 
-        # Create backup first
-        backup_path = f"{self.excel_path}.backup"
-        if not os.path.exists(backup_path):
-            shutil.copy2(self.excel_path, backup_path)
-            print(f"\n  [BACKUP] Created: {backup_path}")
+        # Create a fresh timestamped backup before every write run
+        from datetime import datetime as _dt
+        base, ext = os.path.splitext(self.excel_path)
+        backup_path = f"{base}_backup_{_dt.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+        shutil.copy2(self.excel_path, backup_path)
+        print(f"\n  [BACKUP] Created: {backup_path}")
 
         import win32com.client
         import pythoncom
-        
+
         # We must use absolute paths for win32com
         abs_in = os.path.abspath(self.excel_path)
         abs_out = os.path.abspath(output_path)
-        
-        # First copy the original file to output path so we can edit it in place
+
+        # Copy original to output path so we edit in place
         if abs_in != abs_out:
             shutil.copy2(abs_in, abs_out)
-            
-        # Initialize COM in the background thread
+
+        # Guard COM objects so finally clause is safe even if init fails
+        excel = None
+        wb = None
         pythoncom.CoInitialize()
         try:
             excel = win32com.client.DispatchEx("Excel.Application")
             excel.Visible = False
             excel.DisplayAlerts = False
-            
+
             wb = excel.Workbooks.Open(abs_out)
-            try:
-                ws = wb.Sheets(MASTER_SHEET)
-                
-                for diff in diffs:
-                    # Highlight the entire row in Bright Yellow (same as modified cells)
-                    row_range = ws.Range(ws.Cells(diff.row_number, 1), ws.Cells(diff.row_number, 36))
-                    row_range.Interior.Color = 65535  # Bright Yellow (0x00FFFF)
-                    
-                    for col_name, change in diff.changes.items():
-                        new_val = change["new"]
-                        col_num = change["col"]
+            ws = wb.Sheets(MASTER_SHEET)
 
-                        # Convert ISO date strings to MM/DD/YYYY for native Excel
-                        if new_val and isinstance(new_val, str) and len(new_val) == 10:
-                            try:
-                                parts = new_val.split("-")
-                                if len(parts) == 3:
-                                    new_val = f"{parts[1]}/{parts[2]}/{parts[0]}"
-                            except (ValueError, IndexError):
-                                pass
+            for diff in diffs:
+                # Highlight the entire updated row in Bright Yellow
+                row_range = ws.Range(ws.Cells(diff.row_number, 1), ws.Cells(diff.row_number, 36))
+                row_range.Interior.Color = 65535  # RGB(255,255,0) => 0x00FFFF => 65535
 
-                        target_cell = ws.Cells(diff.row_number, col_num)
-                        target_cell.Value = new_val
-                        # Highlight specific modified cells in bright Yellow
-                        # Bright Yellow: RGB(255, 255, 0) -> BGR(0, 255, 255) -> 0x00FFFF -> 65535
-                        target_cell.Interior.Color = 65535
-                        
-                wb.Save()
-            finally:
-                wb.Close(SaveChanges=False)
+                for col_name, change in diff.changes.items():
+                    new_val = change["new"]
+                    col_num = change["col"]
+
+                    # Convert ISO date strings to MM/DD/YYYY for native Excel
+                    if new_val and isinstance(new_val, str) and len(new_val) == 10:
+                        try:
+                            parts = new_val.split("-")
+                            if len(parts) == 3:
+                                new_val = f"{parts[1]}/{parts[2]}/{parts[0]}"
+                        except (ValueError, IndexError):
+                            pass
+
+                    target_cell = ws.Cells(diff.row_number, col_num)
+                    target_cell.Value = new_val
+                    target_cell.Interior.Color = 65535
+
+            wb.Save()
+
         finally:
-            excel.Quit()
+            # Guard each step: only call if successfully initialized
+            if wb is not None:
+                try:
+                    wb.Close(SaveChanges=False)
+                except Exception:
+                    pass
+            if excel is not None:
+                try:
+                    excel.Quit()
+                except Exception:
+                    pass
             pythoncom.CoUninitialize()
 
         print(f"\n  [SAVED] Updated workbook via Excel Interop: {output_path}")
